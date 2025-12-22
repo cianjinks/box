@@ -20,7 +20,8 @@
           packages = [
             pkgs.go
             pkgs.delve
-            # gopls, goimports, etc
+            pkgs.gopls
+            # goimports, etc
             pkgs.gotools
           ];
         };
