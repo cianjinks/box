@@ -23,6 +23,8 @@
             pkgs.gopls
             # goimports, etc
             pkgs.gotools
+            # container
+            pkgs.umoci
           ];
         };
       }

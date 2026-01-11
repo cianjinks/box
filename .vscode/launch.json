@@ -1,0 +1,16 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch Box",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/cmd/box",
+            "args": [
+                "docker.io/library/alpine:latest",
+                "${workspaceFolder}/build/images/alpine/image"
+            ]
+        }
+    ]
+}
