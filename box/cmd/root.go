@@ -8,8 +8,10 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "box",
-	Short: "Box is a toy container runtime",
+	Use:           "box",
+	Short:         "Box is a toy container runtime",
+	SilenceErrors: true,
+	SilenceUsage:  true,
 	CompletionOptions: cobra.CompletionOptions{
 		DisableDefaultCmd: true,
 	},
