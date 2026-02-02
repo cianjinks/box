@@ -17,8 +17,8 @@ import (
 )
 
 const (
-	rootfsPath = "rootfs"
-	configFile = "config.json"
+	rootfsFolder = "rootfs"
+	configFile   = "config.json"
 )
 
 var pullCmd = &cobra.Command{
@@ -66,7 +66,7 @@ var pullCmd = &cobra.Command{
 }
 
 func extractRootFS(image v1.Image, path string) error {
-	base := filepath.Join(path, rootfsPath)
+	base := filepath.Join(path, rootfsFolder)
 
 	layers, err := image.Layers()
 	if err != nil {

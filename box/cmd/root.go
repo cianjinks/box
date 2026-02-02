@@ -65,5 +65,6 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "enable verbose logging")
 
 	rootCmd.AddCommand(pullCmd)
-	rootCmd.AddCommand(createCmd)
+	rootCmd.AddCommand(runCmd)
+	rootCmd.AddCommand(childCmd)
 }
