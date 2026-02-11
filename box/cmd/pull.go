@@ -22,7 +22,7 @@ const (
 )
 
 var pullCmd = &cobra.Command{
-	Use:   "pull [uri] [runtime-bundle-path]",
+	Use:   "pull uri runtime-bundle-path",
 	Short: "pull a remote image and write a container runtime bundle to disk",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -105,13 +105,8 @@ func extractRootFS(image v1.Image, path string) error {
 					return err
 				}
 			case tar.TypeReg:
-				// ensure parent directory exists
-				if err := os.MkdirAll(filepath.Dir(target), os.FileMode(0755)); err != nil {
-					return err
-				}
-
 				// create file
-				file, err := os.Create(target)
+				file, err := os.OpenFile(target, os.O_RDWR|os.O_CREATE|os.O_TRUNC, os.FileMode(header.Mode))
 				if err != nil {
 					return err
 				}
