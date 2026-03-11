@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"os"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -35,19 +36,7 @@ var childCmd = &cobra.Command{
 			return fmt.Errorf("failed to create bind mount for rootfs: %w", err)
 		}
 
-		// 3. create other mounts from the OCI config
-		for _, m := range config.Mounts {
-			log.Info("creating mount from config", "m", m.Destination)
-			_, _, err := ParseMountFlagsAndDataFromOptions(m.Options)
-			if err != nil {
-				return err
-			}
-			// if err := syscall.Mount(m.Source, m.Destination, m.Type, flags, data); err != nil {
-			// 	return err
-			// }
-		}
-
-		// 4. pivot_root, we use this trick from the man page to pivot without a needing temporary
+		// 3. pivot_root, we use this trick from the man page to pivot without a needing temporary
 		//    directory to hold the old root
 		log.Info("applying pivot root to rootfs")
 		if err := syscall.Chdir(rootfsPath); err != nil {
@@ -63,13 +52,37 @@ var childCmd = &cobra.Command{
 			return fmt.Errorf("failed to unmount old rootfs: %w", err)
 		}
 
+		// 4. create other mounts from the OCI config
+		for _, m := range config.Mounts {
+			log.Info("creating mount from config", "m", m.Destination)
+
+			// ensure mount directory exists
+			if err := os.MkdirAll(m.Destination, 0755); err != nil {
+				return fmt.Errorf("failed to create mount directory at %s: %w", m.Destination, err)
+			}
+
+			// it's difficult to use cgroup v1 on a host with v2
+			if m.Type == "cgroup" {
+				m.Type = "cgroup2"
+			}
+
+			// mount
+			flags, data, err := ParseMountFlagsAndDataFromOptions(m.Options)
+			if err != nil {
+				return fmt.Errorf("failed to parse mount options for %s: %w", m.Destination, err)
+			}
+			if err := syscall.Mount(m.Source, m.Destination, m.Type, flags, data); err != nil {
+				return fmt.Errorf("failed to mount %s: %w", m.Destination, err)
+			}
+		}
+
 		// 5. other OCI config
 		if config.Hostname != "" {
 			log.Info("setting hostname", "hostname", config.Hostname)
 			syscall.Sethostname([]byte(config.Hostname))
 		}
 
-		// 6. drop priveleges
+		// 6. drop privileges
 		// TODO
 
 		// 7. execve the container process

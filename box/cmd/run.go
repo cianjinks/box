@@ -34,13 +34,14 @@ var runCmd = &cobra.Command{
 		exec.Stdout = os.Stdout
 		exec.Stderr = os.Stderr
 		exec.SysProcAttr = &syscall.SysProcAttr{
+			// CLONE_NEWCGROUP: new cgroup namespace
 			// CLONE_NEWIPC: new IPC namespace
 			// CLONE_NEWNET: new network namespace
 			// CLONE_NEWNS: new mount namespace
 			// CLONE_NEWPID: new PID namespace
 			// CLONE_NEWUTS: new UTS namespace (hostname + NIS domain isolation)
 			// TODO: build this list from the OCI config
-			Cloneflags: syscall.CLONE_NEWIPC | syscall.CLONE_NEWNET | syscall.CLONE_NEWNS | syscall.CLONE_NEWPID | syscall.CLONE_NEWUTS,
+			Cloneflags: syscall.CLONE_NEWCGROUP | syscall.CLONE_NEWIPC | syscall.CLONE_NEWNET | syscall.CLONE_NEWNS | syscall.CLONE_NEWPID | syscall.CLONE_NEWUTS,
 			// TODO: `UseCgroupFD` and `CgroupFD`
 		}
 
