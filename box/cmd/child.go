@@ -52,7 +52,7 @@ var childCmd = &cobra.Command{
 			return fmt.Errorf("failed to unmount old rootfs: %w", err)
 		}
 
-		// 4. create other mounts from the OCI config
+		// 4. create mounts from the OCI config
 		for _, m := range config.Mounts {
 			log.Info("creating mount from config", "m", m.Destination)
 
@@ -76,16 +76,64 @@ var childCmd = &cobra.Command{
 			}
 		}
 
-		// 5. other OCI config
+		// 5. create default devices
+		if err := CreateSpecialDevice("/dev/null", Null); err != nil {
+			return err
+		}
+		if err := CreateSpecialDevice("/dev/zero", Zero); err != nil {
+			return err
+		}
+		if err := CreateSpecialDevice("/dev/full", Full); err != nil {
+			return err
+		}
+		if err := CreateSpecialDevice("/dev/random", Random); err != nil {
+			return err
+		}
+		if err := CreateSpecialDevice("/dev/urandom", URandom); err != nil {
+			return err
+		}
+		if err := CreateSpecialDevice("/dev/tty", TTY); err != nil {
+			return err
+		}
+		// TODO: /dev/console if `terminal: true` in OCI config
+		// TODO: /dev/ptmx
+
+		// 6. hostname
 		if config.Hostname != "" {
 			log.Info("setting hostname", "hostname", config.Hostname)
 			syscall.Sethostname([]byte(config.Hostname))
 		}
 
-		// 6. drop privileges
+		// 7. masked paths
+		// This probably isn't very secure as the empty directory exists inside the rootfs of the container.
+		// Normally we would do this _before_ pivot root and use some working directory on the host for each
+		// container but I didn't want to do that.
+		emptyDir := "/.empty-dir"
+		emptyFile := "/.empty-file"
+		if err := os.MkdirAll(emptyDir, 07550); err != nil {
+			return err
+		}
+		if err := os.WriteFile(emptyFile, []byte{}, 0644); err != nil {
+			return err
+		}
+		if err := MaskPaths(config.Linux.MaskedPaths, emptyDir, emptyFile); err != nil {
+			return fmt.Errorf("failed to mask paths from config: %w", err)
+		}
+
+		// 8. read only paths
+		for _, roPath := range config.Linux.ReadonlyPaths {
+			if err := syscall.Mount(roPath, roPath, "", syscall.MS_BIND|syscall.MS_REC, ""); err != nil {
+				return err
+			}
+			if err := syscall.Mount(roPath, roPath, "", syscall.MS_BIND|syscall.MS_REMOUNT|syscall.MS_RDONLY, ""); err != nil {
+				return err
+			}
+		}
+
+		// 9. drop privileges
 		// TODO
 
-		// 7. execve the container process
+		// 10. execve the container process
 		log.Info("executing container process")
 		if config.Process.Cwd != "" {
 			if err := syscall.Chdir(config.Process.Cwd); err != nil {

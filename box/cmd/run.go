@@ -20,8 +20,7 @@ var runCmd = &cobra.Command{
 		ctx := cmd.Context()
 		log := Logger(ctx)
 
-		// TODO: use information from config here, such as namespaces and more
-		_, _, err := GetConfigAndRootFromRuntimePath(runtimePath)
+		config, _, err := GetConfigAndRootFromRuntimePath(runtimePath)
 		if err != nil {
 			return err
 		}
@@ -29,19 +28,12 @@ var runCmd = &cobra.Command{
 		log.Info("run", "container", containerId)
 
 		exec := exec.Command("/proc/self/exe", "child", runtimePath)
-		// TODO: use a PTY for security
+		// TODO: use a PTY
 		exec.Stdin = os.Stdin
 		exec.Stdout = os.Stdout
 		exec.Stderr = os.Stderr
 		exec.SysProcAttr = &syscall.SysProcAttr{
-			// CLONE_NEWCGROUP: new cgroup namespace
-			// CLONE_NEWIPC: new IPC namespace
-			// CLONE_NEWNET: new network namespace
-			// CLONE_NEWNS: new mount namespace
-			// CLONE_NEWPID: new PID namespace
-			// CLONE_NEWUTS: new UTS namespace (hostname + NIS domain isolation)
-			// TODO: build this list from the OCI config
-			Cloneflags: syscall.CLONE_NEWCGROUP | syscall.CLONE_NEWIPC | syscall.CLONE_NEWNET | syscall.CLONE_NEWNS | syscall.CLONE_NEWPID | syscall.CLONE_NEWUTS,
+			Cloneflags: CloneFlagsFromNamespaces(config.Linux.Namespaces),
 			// TODO: `UseCgroupFD` and `CgroupFD`
 		}
 

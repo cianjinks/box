@@ -84,3 +84,64 @@ var mountFlagMap = map[string]uintptr{
 	// TODO: MS_SYNCHRONOUS?
 	"nosymfollow": 0x100,
 }
+
+// CloneFlagsFromNamespaces takes a list of namespaces from an OCI runtime config and returns
+// the corresponding flags bitmask for unshare(2).
+func CloneFlagsFromNamespaces(namespaces []specs.LinuxNamespace) uintptr {
+	var flags uintptr
+	for _, ns := range namespaces {
+		if flag, ok := namespaceFlagMap[ns.Type]; ok {
+			flags |= flag
+		}
+	}
+	return flags
+}
+
+var namespaceFlagMap = map[specs.LinuxNamespaceType]uintptr{
+	specs.PIDNamespace:     syscall.CLONE_NEWPID,
+	specs.NetworkNamespace: syscall.CLONE_NEWNET,
+	specs.MountNamespace:   syscall.CLONE_NEWNS,
+	specs.IPCNamespace:     syscall.CLONE_NEWIPC,
+	specs.UTSNamespace:     syscall.CLONE_NEWUTS,
+	specs.UserNamespace:    syscall.CLONE_NEWUSER,
+	specs.CgroupNamespace:  syscall.CLONE_NEWCGROUP,
+	specs.TimeNamespace:    syscall.CLONE_NEWTIME,
+}
+
+type SpecialDevice int
+
+const (
+	Null    SpecialDevice = (1 << 8) | 3
+	Zero    SpecialDevice = (1 << 8) | 5
+	Full    SpecialDevice = (1 << 8) | 7
+	Random  SpecialDevice = (1 << 8) | 8
+	URandom SpecialDevice = (1 << 8) | 9
+	TTY     SpecialDevice = (5 << 8) | 0
+)
+
+func CreateSpecialDevice(path string, dev SpecialDevice) error {
+	if err := syscall.Mknod(path, syscall.S_IFCHR|0666, int(dev)); err != nil {
+		return fmt.Errorf("failed to create special device at %s: %w", path, err)
+	}
+	return nil
+}
+
+// MaskPaths hides the given set of paths by bind mounting either `dirMask` or `fileMask`
+// on top of them, depending on whether the path is a directory or file respetively.
+func MaskPaths(paths []string, dirMask string, fileMask string) error {
+	for _, maskedPath := range paths {
+		stat, err := os.Stat(maskedPath)
+		if err != nil {
+			// if the path doesn't exist no need to do anything
+			return nil
+		}
+		source := dirMask
+		if !stat.IsDir() {
+			source = fileMask
+		}
+		if err := syscall.Mount(source, maskedPath, "", syscall.MS_BIND, ""); err != nil {
+			return fmt.Errorf("failed to bind mount path %s: %w", maskedPath, err)
+		}
+	}
+	return nil
+}
