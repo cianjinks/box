@@ -21,4 +21,6 @@ require (
 	github.com/vbatts/tar-split v0.12.2 // indirect
 	golang.org/x/sync v0.18.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
+	kernel.org/pub/linux/libs/security/libcap/cap v1.2.77 // indirect
+	kernel.org/pub/linux/libs/security/libcap/psx v1.2.77 // indirect
 )

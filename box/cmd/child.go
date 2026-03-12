@@ -4,9 +4,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"syscall"
 
 	"github.com/spf13/cobra"
+	"kernel.org/pub/linux/libs/security/libcap/cap"
 )
 
 var childCmd = &cobra.Command{
@@ -77,6 +79,7 @@ var childCmd = &cobra.Command{
 		}
 
 		// 5. create default devices
+		log.Info("creating default devices (null, zero, random, etc)")
 		if err := CreateSpecialDevice("/dev/null", Null); err != nil {
 			return err
 		}
@@ -131,7 +134,57 @@ var childCmd = &cobra.Command{
 		}
 
 		// 9. drop privileges
-		// TODO
+		// https://sites.google.com/site/fullycapable/Home?authuser=0
+		log.Info("dropping privileges / capabilities")
+
+		// 9.1 ambient
+		ambientValues, err := ParseCapabilities(config.Process.Capabilities.Ambient)
+		if err != nil {
+			return fmt.Errorf("failed to parse ambient capabilities from config: %w", err)
+		}
+		cap.ResetAmbient()
+		for _, capability := range ambientValues {
+			cap.SetAmbient(true, capability)
+		}
+
+		// 9.2 bounding
+		boundingValues, err := ParseCapabilities(config.Process.Capabilities.Bounding)
+		for c := cap.Value(0); c < cap.NamedCount; c++ {
+			v, err := cap.GetBound(c)
+			if err != nil {
+				return fmt.Errorf("failed to get bounding capabiliy %s: %w", c.String(), err)
+			}
+			if v && !slices.Contains(boundingValues, c) {
+				cap.DropBound(c)
+			}
+		}
+
+		// 9.3 effective, permitted, inheritable
+		set := cap.NewSet()
+		effectiveValues, err := ParseCapabilities(config.Process.Capabilities.Effective)
+		if err != nil {
+			return fmt.Errorf("failed to parse effective capabilities from config: %w", err)
+		}
+		for _, capability := range effectiveValues {
+			set.SetFlag(cap.Effective, true, capability)
+		}
+		permittedValues, err := ParseCapabilities(config.Process.Capabilities.Permitted)
+		if err != nil {
+			return fmt.Errorf("failed to parse permitted capabilities from config: %w", err)
+		}
+		for _, capability := range permittedValues {
+			set.SetFlag(cap.Permitted, true, capability)
+		}
+		inheritableValues, err := ParseCapabilities(config.Process.Capabilities.Inheritable)
+		if err != nil {
+			return fmt.Errorf("failed to parse inheritable capabilities from config: %w", err)
+		}
+		for _, capability := range inheritableValues {
+			set.SetFlag(cap.Inheritable, true, capability)
+		}
+		if err := set.SetProc(); err != nil {
+			return fmt.Errorf("failed to set effective/permitted/inheritable capabilities of the process: %w", err)
+		}
 
 		// 10. execve the container process
 		log.Info("executing container process")

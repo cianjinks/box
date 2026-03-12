@@ -9,6 +9,7 @@ import (
 	"syscall"
 
 	"github.com/opencontainers/runtime-spec/specs-go"
+	"kernel.org/pub/linux/libs/security/libcap/cap"
 )
 
 // GetConfigAndRootFromRuntimePath expects an OCI runtime bundle at `runtimePath`. It returns the
@@ -35,25 +36,6 @@ func GetConfigAndRootFromRuntimePath(runtimePath string) (*specs.Spec, string, e
 	}
 
 	return config, rootfsPath, nil
-}
-
-// ParseMountFlagsAndDataFromOptions expects a list of mount options from an OCI runtime config. It
-// converts these options into the corresponding `flags` and `data` parameters for the mount syscall.
-// See: https://github.com/opencontainers/runtime-spec/blob/main/config.md#linux-mount-options
-func ParseMountFlagsAndDataFromOptions(options []string) (uintptr, string, error) {
-	var flags uintptr
-	var dataBuilder strings.Builder
-
-	for _, o := range options {
-		if flag, ok := mountFlagMap[o]; ok {
-			flags |= flag
-		} else {
-			dataBuilder.WriteString(o + ",")
-
-		}
-	}
-
-	return flags, dataBuilder.String(), nil
 }
 
 // The mount options in an OCI runtime config include both flags and data and we must manually
@@ -85,16 +67,23 @@ var mountFlagMap = map[string]uintptr{
 	"nosymfollow": 0x100,
 }
 
-// CloneFlagsFromNamespaces takes a list of namespaces from an OCI runtime config and returns
-// the corresponding flags bitmask for unshare(2).
-func CloneFlagsFromNamespaces(namespaces []specs.LinuxNamespace) uintptr {
+// ParseMountFlagsAndDataFromOptions expects a list of mount options from an OCI runtime config. It
+// converts these options into the corresponding `flags` and `data` parameters for the mount syscall.
+// See: https://github.com/opencontainers/runtime-spec/blob/main/config.md#linux-mount-options
+func ParseMountFlagsAndDataFromOptions(options []string) (uintptr, string, error) {
 	var flags uintptr
-	for _, ns := range namespaces {
-		if flag, ok := namespaceFlagMap[ns.Type]; ok {
+	var dataBuilder strings.Builder
+
+	for _, o := range options {
+		if flag, ok := mountFlagMap[o]; ok {
 			flags |= flag
+		} else {
+			dataBuilder.WriteString(o + ",")
+
 		}
 	}
-	return flags
+
+	return flags, dataBuilder.String(), nil
 }
 
 var namespaceFlagMap = map[specs.LinuxNamespaceType]uintptr{
@@ -106,6 +95,18 @@ var namespaceFlagMap = map[specs.LinuxNamespaceType]uintptr{
 	specs.UserNamespace:    syscall.CLONE_NEWUSER,
 	specs.CgroupNamespace:  syscall.CLONE_NEWCGROUP,
 	specs.TimeNamespace:    syscall.CLONE_NEWTIME,
+}
+
+// CloneFlagsFromNamespaces takes a list of namespaces from an OCI runtime config and returns
+// the corresponding flags bitmask for unshare(2).
+func CloneFlagsFromNamespaces(namespaces []specs.LinuxNamespace) uintptr {
+	var flags uintptr
+	for _, ns := range namespaces {
+		if flag, ok := namespaceFlagMap[ns.Type]; ok {
+			flags |= flag
+		}
+	}
+	return flags
 }
 
 type SpecialDevice int
@@ -127,7 +128,7 @@ func CreateSpecialDevice(path string, dev SpecialDevice) error {
 }
 
 // MaskPaths hides the given set of paths by bind mounting either `dirMask` or `fileMask`
-// on top of them, depending on whether the path is a directory or file respetively.
+// on top of them, depending on whether the path is a directory or file respectively.
 func MaskPaths(paths []string, dirMask string, fileMask string) error {
 	for _, maskedPath := range paths {
 		stat, err := os.Stat(maskedPath)
@@ -144,4 +145,24 @@ func MaskPaths(paths []string, dirMask string, fileMask string) error {
 		}
 	}
 	return nil
+}
+
+var capMap = map[string]cap.Value{
+	"CAP_AUDIT_WRITE":      cap.AUDIT_WRITE,
+	"CAP_KILL":             cap.KILL,
+	"CAP_NET_BIND_SERVICE": cap.NET_BIND_SERVICE,
+}
+
+// ParseCapabilities takes a list of capability strings from an OCI runtime config and returns
+// the corresponding libcap `cap.Value` enum values.
+func ParseCapabilities(capabilities []string) ([]cap.Value, error) {
+	results := []cap.Value{}
+	for _, capability := range capabilities {
+		if val, ok := capMap[capability]; ok {
+			results = append(results, val)
+		} else {
+			return []cap.Value{}, fmt.Errorf("found unsupported capability %s", capability)
+		}
+	}
+	return results, nil
 }
