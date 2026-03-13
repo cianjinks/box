@@ -8,8 +8,11 @@ import (
 	"syscall"
 
 	"github.com/spf13/cobra"
+	"github.com/vishvananda/netlink"
 	"kernel.org/pub/linux/libs/security/libcap/cap"
 )
+
+const parentPipeFD = uintptr(3)
 
 var childCmd = &cobra.Command{
 	Use:    "child runtime-bundle-path",
@@ -133,11 +136,32 @@ var childCmd = &cobra.Command{
 			}
 		}
 
-		// 9. drop privileges
+		// 9. wait for parent to setup networking + cgroups (block on pipe)
+		pipe := os.NewFile(parentPipeFD, "pipe")
+		buf := make([]byte, 1)
+		pipe.Read(buf)
+
+		// 10. configure container veth interface now that it has been placed
+		//     inside the container namespace by the parent
+		// find it
+		containerVethLink, err := netlink.LinkByName(ContainerVethName)
+		if err != nil {
+			return fmt.Errorf("failed to find container veth interface: %w", err)
+		}
+		// bring UP
+		if err := netlink.LinkSetUp(containerVethLink); err != nil {
+			return fmt.Errorf("failed to set container veth UP: %w", err)
+		}
+
+		// 11. drop privileges
 		// https://sites.google.com/site/fullycapable/Home?authuser=0
+		// the capabilities APIs are strange:
+		//  - ambient and bounding controlled through prctl
+		//  - bounding can only be dropped
+		//  - effective, permitted, inheritable controlled through capset
 		log.Info("dropping privileges / capabilities")
 
-		// 9.1 ambient
+		// 11.1 ambient
 		ambientValues, err := ParseCapabilities(config.Process.Capabilities.Ambient)
 		if err != nil {
 			return fmt.Errorf("failed to parse ambient capabilities from config: %w", err)
@@ -147,7 +171,7 @@ var childCmd = &cobra.Command{
 			cap.SetAmbient(true, capability)
 		}
 
-		// 9.2 bounding
+		// 11.2 bounding
 		boundingValues, err := ParseCapabilities(config.Process.Capabilities.Bounding)
 		for c := cap.Value(0); c < cap.NamedCount; c++ {
 			v, err := cap.GetBound(c)
@@ -159,7 +183,7 @@ var childCmd = &cobra.Command{
 			}
 		}
 
-		// 9.3 effective, permitted, inheritable
+		// 11.3 effective, permitted, inheritable
 		set := cap.NewSet()
 		effectiveValues, err := ParseCapabilities(config.Process.Capabilities.Effective)
 		if err != nil {
@@ -186,7 +210,7 @@ var childCmd = &cobra.Command{
 			return fmt.Errorf("failed to set effective/permitted/inheritable capabilities of the process: %w", err)
 		}
 
-		// 10. execve the container process
+		// 12. execve the container process
 		log.Info("executing container process")
 		if config.Process.Cwd != "" {
 			if err := syscall.Chdir(config.Process.Cwd); err != nil {
