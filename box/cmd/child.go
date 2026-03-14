@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"slices"
 	"syscall"
 
@@ -13,7 +14,10 @@ import (
 	"kernel.org/pub/linux/libs/security/libcap/cap"
 )
 
-const parentPipeFD = uintptr(3)
+const (
+	parentPipeFD = uintptr(3)
+	resolvConf   = "/etc/resolv.conf"
+)
 
 var childCmd = &cobra.Command{
 	Use:    "child runtime-bundle-path",
@@ -40,6 +44,20 @@ var childCmd = &cobra.Command{
 		log.Info("creating bind mount for rootfs", "rootfsPath", rootfsPath)
 		if err := syscall.Mount(rootfsPath, rootfsPath, "", syscall.MS_BIND|syscall.MS_REC, ""); err != nil {
 			return fmt.Errorf("failed to create bind mount for rootfs: %w", err)
+		}
+
+		// 3. bind mount host /etc/resolv.conf as readonly for DNS before pivot_root
+		containerResolvPath := filepath.Join(rootfsPath, resolvConf)
+		f, err := os.Create(containerResolvPath)
+		if err != nil {
+			return err
+		}
+		f.Close()
+		if err := syscall.Mount(resolvConf, containerResolvPath, "", syscall.MS_BIND|syscall.MS_REC, ""); err != nil {
+			return err
+		}
+		if err := syscall.Mount(resolvConf, containerResolvPath, "", syscall.MS_BIND|syscall.MS_REMOUNT|syscall.MS_RDONLY, ""); err != nil {
+			return fmt.Errorf("failed to bind mount path as readonly %s: %w", resolvConf, err)
 		}
 
 		// 3. pivot_root, we use this trick from the man page to pivot without a needing temporary
@@ -133,7 +151,7 @@ var childCmd = &cobra.Command{
 				return err
 			}
 			if err := syscall.Mount(roPath, roPath, "", syscall.MS_BIND|syscall.MS_REMOUNT|syscall.MS_RDONLY, ""); err != nil {
-				return err
+				return fmt.Errorf("failed to bind mount path as readonly %s: %w", roPath, err)
 			}
 		}
 
