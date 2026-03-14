@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -151,6 +153,7 @@ var capMap = map[string]cap.Value{
 	"CAP_AUDIT_WRITE":      cap.AUDIT_WRITE,
 	"CAP_KILL":             cap.KILL,
 	"CAP_NET_BIND_SERVICE": cap.NET_BIND_SERVICE,
+	"CAP_NET_RAW":          cap.NET_RAW,
 }
 
 // ParseCapabilities takes a list of capability strings from an OCI runtime config and returns
@@ -165,4 +168,39 @@ func ParseCapabilities(capabilities []string) ([]cap.Value, error) {
 		}
 	}
 	return results, nil
+}
+
+const ipForwardFile = "/proc/sys/net/ipv4/ip_forward"
+
+// SetupNAT enables IP forwarding and creates an iptables rule to masquerade the container IP as coming from the host
+func SetupNAT(ip string) (int, error) {
+	// Try enable IP forwarding if it's not already
+	data, err := os.ReadFile(ipForwardFile)
+	if err != nil {
+		return 0, err
+	}
+	ipForwardEnabled, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return 0, err
+	}
+	if ipForwardEnabled != 1 {
+		if err := os.WriteFile(ipForwardFile, []byte("1"), 0644); err != nil {
+			return ipForwardEnabled, err
+		}
+	}
+
+	// TODO: if we ever wanted container to container networking we should do full subnet and disable internal NAT
+	cmd := exec.Command("iptables", "-t", "nat", "-A", "POSTROUTING", "-s", fmt.Sprintf("%s/32", ip), "-j", "MASQUERADE")
+	if err := cmd.Run(); err != nil {
+		return ipForwardEnabled, fmt.Errorf("failed to create iptables entry for container: %w", err)
+	}
+	return ipForwardEnabled, nil
+}
+
+// CleanupNAT cleans up the ip forwading setting and iptables rule added by SetupNAT
+func CleanupNAT(ip string, ipForwardEnabled int) {
+	os.WriteFile(ipForwardFile, []byte(strconv.Itoa(ipForwardEnabled)), 0644)
+	cmd := exec.Command("iptables", "-t", "nat", "-D", "POSTROUTING", "-s", fmt.Sprintf("%s/32", ip), "-j", "MASQUERADE")
+	// we don't handle the errror since if the rule was never written it will fail
+	cmd.Run()
 }

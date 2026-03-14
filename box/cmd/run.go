@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"syscall"
@@ -13,8 +14,11 @@ import (
 
 const (
 	bridgeName        = "bridge-box"
+	BridgeIP          = "10.0.0.171"
+	BridgePrefix      = 24
 	hostVethName      = "veth-box-host"
 	ContainerVethName = "veth-box-cont"
+	ContainerIP       = "10.0.0.172"
 )
 
 var runCmd = &cobra.Command{
@@ -62,6 +66,15 @@ var runCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to find bridge interface: %w", err)
 		}
+		addr := &netlink.Addr{
+			IPNet: &net.IPNet{
+				IP:   net.ParseIP(BridgeIP),
+				Mask: net.CIDRMask(BridgePrefix, 32),
+			},
+		}
+		if err := netlink.AddrAdd(bridgeLink, addr); err != nil {
+			return fmt.Errorf("failed to add IP address to bridge %s: %w", BridgeIP, err)
+		}
 		defer netlink.LinkDel(bridgeLink)
 		// create veth pair
 		hostVethAttrs := netlink.NewLinkAttrs()
@@ -93,6 +106,12 @@ var runCmd = &cobra.Command{
 		if err := netlink.LinkSetUp(hostVethLink); err != nil {
 			return fmt.Errorf("failed to set host veth UP: %w", err)
 		}
+		// setup NAT
+		ipForwardEnabled, err := SetupNAT(ContainerIP)
+		if err != nil {
+			return fmt.Errorf("failed to setup container NAT: %w", err)
+		}
+		defer CleanupNAT(ContainerIP, ipForwardEnabled)
 
 		// 3. signal child to continue
 		w.Close()

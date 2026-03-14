@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"slices"
 	"syscall"
@@ -148,9 +149,28 @@ var childCmd = &cobra.Command{
 		if err != nil {
 			return fmt.Errorf("failed to find container veth interface: %w", err)
 		}
+		// give IP
+		addr := &netlink.Addr{
+			IPNet: &net.IPNet{
+				IP:   net.ParseIP(ContainerIP),
+				Mask: net.CIDRMask(BridgePrefix, 32),
+			},
+		}
+		if err := netlink.AddrAdd(containerVethLink, addr); err != nil {
+			return fmt.Errorf("failed to add IP address to container veth %s: %w", ContainerIP, err)
+		}
 		// bring UP
 		if err := netlink.LinkSetUp(containerVethLink); err != nil {
 			return fmt.Errorf("failed to set container veth UP: %w", err)
+		}
+		// add default route to bridge
+		route := &netlink.Route{
+			LinkIndex: containerVethLink.Attrs().Index,
+			Gw:        net.ParseIP(BridgeIP),
+			Dst:       nil, // default route (0.0.0.0/0)
+		}
+		if err := netlink.RouteAdd(route); err != nil {
+			return fmt.Errorf("failed to add default route to bridge: %w", err)
 		}
 
 		// 11. drop privileges
