@@ -6,8 +6,11 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"runtime"
 	"syscall"
 
+	systemd "github.com/coreos/go-systemd/v22/dbus"
+	dbus "github.com/godbus/dbus/v5"
 	"github.com/spf13/cobra"
 	"github.com/vishvananda/netlink"
 )
@@ -21,8 +24,16 @@ const (
 	ContainerIP       = "10.0.0.172"
 )
 
+var cpuCount int
+var memoryMiB int
+
+func init() {
+	runCmd.Flags().IntVar(&cpuCount, "cpus", -1, "Limit the number of CPUs available to the container")
+	runCmd.Flags().IntVar(&memoryMiB, "mem", -1, "Limit the amount of memory available to the container (in MiB)")
+}
+
 var runCmd = &cobra.Command{
-	Use:   "run container-id runtime-bundle-path",
+	Use:   "run [flags] <container-id> <runtime-bundle-path>",
 	Short: "run a container from a runtime bundle on disk",
 	Args:  cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -49,7 +60,6 @@ var runCmd = &cobra.Command{
 		child.ExtraFiles = []*os.File{r}
 		child.SysProcAttr = &syscall.SysProcAttr{
 			Cloneflags: CloneFlagsFromNamespaces(config.Linux.Namespaces),
-			// TODO: `UseCgroupFD` and `CgroupFD`
 		}
 		if err := child.Start(); err != nil {
 			return fmt.Errorf("failed to start child process: %w", err)
@@ -113,10 +123,42 @@ var runCmd = &cobra.Command{
 		}
 		defer CleanupNAT(ContainerIP, ipForwardEnabled)
 
-		// 3. signal child to continue
+		// 3. place child in cgroup using systemd
+		conn, err := systemd.NewWithContext(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to connect to systemd dbus (sorry box doesn't support non-systemd): %w", err)
+		}
+		defer conn.Close()
+		unitName := fmt.Sprintf("box-container-%d.scope", child.Process.Pid)
+		properties := []systemd.Property{
+			{Name: "PIDs", Value: dbus.MakeVariant([]uint32{uint32(child.Process.Pid)})},
+			{Name: "Description", Value: dbus.MakeVariant("Box container scope")},
+		}
+		if cpuCount != -1 && cpuCount > 1 && cpuCount <= runtime.NumCPU() {
+			properties = append(properties, systemd.Property{
+				Name:  "CPUQuotaPerSecUSec",
+				Value: dbus.MakeVariant(uint64(cpuCount) * 100000),
+			})
+		}
+		if memoryMiB != -1 {
+			properties = append(properties, systemd.Property{
+				Name: "MemoryMax", Value: dbus.MakeVariant(uint64(memoryMiB) * 1048576),
+			})
+		}
+		doneChan := make(chan string, 1)
+		if _, err := conn.StartTransientUnitContext(ctx, unitName, "replace", properties, doneChan); err != nil {
+			return fmt.Errorf("failed to start transient unit for container: %w", err)
+		}
+		select {
+		case <-doneChan:
+		case <-ctx.Done():
+			return fmt.Errorf("timeout waiting for start transient unit: %w", ctx.Err())
+		}
+
+		// 4. signal child to continue
 		w.Close()
 
-		// 4. wait for exit
+		// 5. wait for exit
 		if err := child.Wait(); err != nil {
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) && exitErr.ExitCode() == 130 {

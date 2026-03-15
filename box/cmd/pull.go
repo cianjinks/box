@@ -66,11 +66,15 @@ var pullCmd = &cobra.Command{
 }
 
 func extractRootFS(image v1.Image, path string) error {
-	base := filepath.Join(path, rootfsFolder)
 
 	layers, err := image.Layers()
 	if err != nil {
 		return fmt.Errorf("failed to get image layers: %w", err)
+	}
+
+	base := filepath.Join(path, rootfsFolder)
+	if err := os.MkdirAll(base, 0755); err != nil {
+		return err
 	}
 
 	for _, layer := range layers {
@@ -115,6 +119,12 @@ func extractRootFS(image v1.Image, path string) error {
 					return err
 				}
 				file.Close()
+			case tar.TypeLink:
+				linkTarget := filepath.Join(base, header.Linkname)
+				if err := os.Link(linkTarget, target); err != nil {
+					return err
+
+				}
 			case tar.TypeSymlink:
 				if err := os.Symlink(header.Linkname, target); err != nil {
 					if !errors.Is(err, os.ErrExist) {
