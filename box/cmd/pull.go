@@ -66,7 +66,6 @@ var pullCmd = &cobra.Command{
 }
 
 func extractRootFS(image v1.Image, path string) error {
-
 	layers, err := image.Layers()
 	if err != nil {
 		return fmt.Errorf("failed to get image layers: %w", err)
@@ -140,6 +139,23 @@ func extractRootFS(image v1.Image, path string) error {
 	return nil
 }
 
+var defaultCaps = []string{
+	"CAP_CHOWN",
+	"CAP_DAC_OVERRIDE",
+	"CAP_FSETID",
+	"CAP_FOWNER",
+	"CAP_MKNOD",
+	"CAP_NET_RAW",
+	"CAP_SETGID",
+	"CAP_SETUID",
+	"CAP_SETFCAP",
+	"CAP_SETPCAP",
+	"CAP_NET_BIND_SERVICE",
+	"CAP_SYS_CHROOT",
+	"CAP_KILL",
+	"CAP_AUDIT_WRITE",
+}
+
 func generateConfig(image v1.Image, path string) error {
 	configPath := filepath.Join(path, configFile)
 
@@ -148,32 +164,25 @@ func generateConfig(image v1.Image, path string) error {
 		return fmt.Errorf("failed to get image config: %w", err)
 	}
 
-	// Mostly taken from: https://github.com/opencontainers/runc/blob/506a849db794a0ee84ba9fb0d9465d960b62876c/libcontainer/specconv/example.go#L14
+	// Based on:
+	//  - https://github.com/opencontainers/runc/blob/506a849db794a0ee84ba9fb0d9465d960b62876c/libcontainer/specconv/example.go#L14
+	//  - https://github.com/containerd/containerd/blob/e3643891a58aa97af5c43d40ea150c9646bcb2d9/pkg/oci/spec.go#L157
 	config := &specs.Spec{
 		Version: specs.Version,
 		Process: &specs.Process{
-			Terminal:        true,
-			User:            specs.User{}, // TODO
+			Terminal: true,
+			User: specs.User{
+				UID: 0,
+				GID: 0,
+			},
 			Args:            imageConfig.Config.Cmd,
 			Env:             imageConfig.Config.Env,
 			Cwd:             imageConfig.Config.WorkingDir,
 			NoNewPrivileges: true,
 			Capabilities: &specs.LinuxCapabilities{
-				Bounding: []string{
-					"CAP_AUDIT_WRITE",
-					"CAP_KILL",
-					"CAP_NET_BIND_SERVICE",
-				},
-				Permitted: []string{
-					"CAP_AUDIT_WRITE",
-					"CAP_KILL",
-					"CAP_NET_BIND_SERVICE",
-				},
-				Effective: []string{
-					"CAP_AUDIT_WRITE",
-					"CAP_KILL",
-					"CAP_NET_BIND_SERVICE",
-				},
+				Bounding:  defaultCaps,
+				Permitted: defaultCaps,
+				Effective: defaultCaps,
 			},
 			Rlimits: []specs.POSIXRlimit{
 				{

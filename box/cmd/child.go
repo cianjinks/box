@@ -34,6 +34,9 @@ var childCmd = &cobra.Command{
 			return err
 		}
 
+		// avoid incorrect permissions
+		syscall.Umask(0)
+
 		// 1. recursively mark all mounts as private to avoid mount leakage
 		log.Info("marking all mounts as private")
 		if err := syscall.Mount("", "/", "", syscall.MS_PRIVATE|syscall.MS_REC, ""); err != nil {
@@ -120,14 +123,22 @@ var childCmd = &cobra.Command{
 		if err := CreateSpecialDevice("/dev/tty", TTY); err != nil {
 			return err
 		}
-		// TODO: /dev/console if `terminal: true` in OCI config
-		// TODO: /dev/ptmx
-
-		// 6. hostname
-		if config.Hostname != "" {
-			log.Info("setting hostname", "hostname", config.Hostname)
-			syscall.Sethostname([]byte(config.Hostname))
+		if err := CreateSpecialDevice("/dev/ptmx", Ptmx); err != nil {
+			return err
 		}
+		// TODO: /dev/console if `terminal: true` in OCI config
+
+		// 6. enforce ownership and mode of some important paths
+		syscall.Chown("/", 0, 0)
+		syscall.Chmod("/", 0755)
+		syscall.Chown("/tmp", 0, 0)
+		syscall.Chmod("/tmp", 01777)
+		syscall.Chown("/etc", 0, 0)
+		syscall.Chmod("/etc", 0755)
+		syscall.Chown("/root", 0, 0)
+		syscall.Chmod("/root", 0700)
+		syscall.Chown("/dev", 0, 0)
+		syscall.Chmod("/dev", 0755)
 
 		// 7. masked paths
 		// This probably isn't very secure as the empty directory exists inside the rootfs of the container.
@@ -155,12 +166,18 @@ var childCmd = &cobra.Command{
 			}
 		}
 
-		// 9. wait for parent to setup networking + cgroups (block on pipe)
+		// 9. hostname
+		if config.Hostname != "" {
+			log.Info("setting hostname", "hostname", config.Hostname)
+			syscall.Sethostname([]byte(config.Hostname))
+		}
+
+		// 10. wait for parent to setup networking + cgroups (block on pipe)
 		pipe := os.NewFile(parentPipeFD, "pipe")
 		buf := make([]byte, 1)
 		pipe.Read(buf)
 
-		// 10. configure container veth interface now that it has been placed
+		// 11. configure container veth interface now that it has been placed
 		//     inside the container namespace by the parent
 		// find it
 		containerVethLink, err := netlink.LinkByName(ContainerVethName)
@@ -191,7 +208,7 @@ var childCmd = &cobra.Command{
 			return fmt.Errorf("failed to add default route to bridge: %w", err)
 		}
 
-		// 11. drop privileges
+		// 12. drop privileges
 		// https://sites.google.com/site/fullycapable/Home?authuser=0
 		// the capabilities APIs are strange:
 		//  - ambient and bounding controlled through prctl
@@ -199,7 +216,7 @@ var childCmd = &cobra.Command{
 		//  - effective, permitted, inheritable controlled through capset
 		log.Info("dropping privileges / capabilities")
 
-		// 11.1 ambient
+		// 12.1 ambient
 		ambientValues, err := ParseCapabilities(config.Process.Capabilities.Ambient)
 		if err != nil {
 			return fmt.Errorf("failed to parse ambient capabilities from config: %w", err)
@@ -209,7 +226,7 @@ var childCmd = &cobra.Command{
 			cap.SetAmbient(true, capability)
 		}
 
-		// 11.2 bounding
+		// 12.2 bounding
 		boundingValues, err := ParseCapabilities(config.Process.Capabilities.Bounding)
 		for c := cap.Value(0); c < cap.NamedCount; c++ {
 			v, err := cap.GetBound(c)
@@ -221,7 +238,7 @@ var childCmd = &cobra.Command{
 			}
 		}
 
-		// 11.3 effective, permitted, inheritable
+		// 12.3 effective, permitted, inheritable
 		set := cap.NewSet()
 		effectiveValues, err := ParseCapabilities(config.Process.Capabilities.Effective)
 		if err != nil {
@@ -248,7 +265,7 @@ var childCmd = &cobra.Command{
 			return fmt.Errorf("failed to set effective/permitted/inheritable capabilities of the process: %w", err)
 		}
 
-		// 12. execve the container process
+		// 13. execve the container process
 		log.Info("executing container process")
 		if config.Process.Cwd != "" {
 			if err := syscall.Chdir(config.Process.Cwd); err != nil {

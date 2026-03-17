@@ -120,6 +120,7 @@ const (
 	Random  SpecialDevice = (1 << 8) | 8
 	URandom SpecialDevice = (1 << 8) | 9
 	TTY     SpecialDevice = (5 << 8) | 0
+	Ptmx    SpecialDevice = (5 << 8) | 2
 )
 
 func CreateSpecialDevice(path string, dev SpecialDevice) error {
@@ -150,10 +151,20 @@ func MaskPaths(paths []string, dirMask string, fileMask string) error {
 }
 
 var capMap = map[string]cap.Value{
-	"CAP_AUDIT_WRITE":      cap.AUDIT_WRITE,
-	"CAP_KILL":             cap.KILL,
-	"CAP_NET_BIND_SERVICE": cap.NET_BIND_SERVICE,
+	"CAP_CHOWN":            cap.CHOWN,
+	"CAP_DAC_OVERRIDE":     cap.DAC_OVERRIDE,
+	"CAP_FSETID":           cap.FSETID,
+	"CAP_FOWNER":           cap.FOWNER,
+	"CAP_MKNOD":            cap.MKNOD,
 	"CAP_NET_RAW":          cap.NET_RAW,
+	"CAP_SETGID":           cap.SETGID,
+	"CAP_SETUID":           cap.SETUID,
+	"CAP_SETFCAP":          cap.SETFCAP,
+	"CAP_SETPCAP":          cap.SETPCAP,
+	"CAP_NET_BIND_SERVICE": cap.NET_BIND_SERVICE,
+	"CAP_SYS_CHROOT":       cap.SYS_CHROOT,
+	"CAP_KILL":             cap.KILL,
+	"CAP_AUDIT_WRITE":      cap.AUDIT_WRITE,
 }
 
 // ParseCapabilities takes a list of capability strings from an OCI runtime config and returns
