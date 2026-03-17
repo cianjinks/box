@@ -215,3 +215,38 @@ func CleanupNAT(ip string, ipForwardEnabled int) {
 	// we don't handle the errror since if the rule was never written it will fail
 	cmd.Run()
 }
+
+// FindExecutable takes an executable name and a PATH environment variable and tries
+// to find the given executable in the paths. It returns the full path to the executable
+// or an error.
+func FindExecutable(executable string, path string) (string, error) {
+	// skip invalid
+	switch path {
+	case "", ".", "..":
+		return "", fmt.Errorf("invalid executable name: %s", executable)
+	}
+
+	// if executable contains a `/`` assume it's already a path
+	if strings.Contains(executable, "/") {
+		if _, err := os.Stat(executable); err != nil {
+			return "", fmt.Errorf("executable is a path but failed to find executable: %s", executable)
+		}
+		return executable, nil
+	}
+
+	// search paths
+	paths := filepath.SplitList(path)
+	for _, p := range paths {
+		if p == "" {
+			p = "."
+		}
+
+		executablePath := filepath.Join(p, executable)
+		if _, err := os.Stat(executablePath); err != nil {
+			continue
+		}
+		return executablePath, nil
+	}
+
+	return "", fmt.Errorf("failed to find executable: %s", executable)
+}

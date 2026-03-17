@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -275,7 +276,18 @@ var childCmd = &cobra.Command{
 		if len(config.Process.Args) <= 0 {
 			return errors.New("no process provided by OCI config")
 		}
-		if err := syscall.Exec(config.Process.Args[0], config.Process.Args, config.Process.Env); err != nil {
+		// if env provides PATH try to resolve the executable, otherwise pass it directly
+		executable := config.Process.Args[0]
+		for _, envVar := range config.Process.Env {
+			split := strings.Split(envVar, "=")
+			if split[0] == "PATH" {
+				executable, err = FindExecutable(executable, split[1])
+				if err != nil {
+					return fmt.Errorf("failed to find executable from config in rootfs: %w", err)
+				}
+			}
+		}
+		if err := syscall.Exec(executable, config.Process.Args, config.Process.Env); err != nil {
 			return fmt.Errorf("failed to execute container process: %w", err)
 		}
 
