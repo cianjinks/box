@@ -51,6 +51,7 @@ var childCmd = &cobra.Command{
 		}
 
 		// 3. bind mount host /etc/resolv.conf as readonly for DNS before pivot_root
+		log.Info("setting up DNS")
 		containerResolvPath := filepath.Join(rootfsPath, resolvConf)
 		f, err := os.Create(containerResolvPath)
 		if err != nil {
@@ -81,9 +82,8 @@ var childCmd = &cobra.Command{
 		}
 
 		// 4. create mounts from the OCI config
+		log.Info("creating mounts from OCI config")
 		for _, m := range config.Mounts {
-			log.Info("creating mount from config", "m", m.Destination)
-
 			// ensure mount directory exists
 			if err := os.MkdirAll(m.Destination, 0755); err != nil {
 				return fmt.Errorf("failed to create mount directory at %s: %w", m.Destination, err)

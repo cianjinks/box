@@ -11,6 +11,7 @@ import (
 var (
 	logJSON bool
 	verbose bool
+	quiet   bool
 )
 
 var rootCmd = &cobra.Command{
@@ -22,7 +23,7 @@ var rootCmd = &cobra.Command{
 		DisableDefaultCmd: true,
 	},
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		log := newLogger(logJSON, verbose)
+		log := newLogger(logJSON, verbose, quiet)
 
 		slog.SetDefault(log)
 
@@ -33,7 +34,11 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-func newLogger(json bool, verbose bool) *slog.Logger {
+func newLogger(json bool, verbose bool, quiet bool) *slog.Logger {
+	if quiet {
+		return slog.New(slog.DiscardHandler)
+	}
+
 	level := slog.LevelInfo
 	if verbose {
 		level = slog.LevelDebug
@@ -41,6 +46,12 @@ func newLogger(json bool, verbose bool) *slog.Logger {
 
 	opts := &slog.HandlerOptions{
 		Level: level,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.TimeKey {
+				return slog.Attr{}
+			}
+			return a
+		},
 	}
 
 	var handler slog.Handler
@@ -63,6 +74,7 @@ func Execute() {
 func init() {
 	rootCmd.PersistentFlags().BoolVar(&logJSON, "json", false, "enable JSON format logging")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "enable verbose logging")
+	rootCmd.PersistentFlags().BoolVarP(&quiet, "quiet", "q", false, "hide all logging")
 
 	rootCmd.AddCommand(pullCmd)
 	rootCmd.AddCommand(runCmd)

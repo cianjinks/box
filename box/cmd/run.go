@@ -13,6 +13,7 @@ import (
 	systemd "github.com/coreos/go-systemd/v22/dbus"
 	dbus "github.com/godbus/dbus/v5"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"github.com/vishvananda/netlink"
 )
 
@@ -59,8 +60,16 @@ var runCmd = &cobra.Command{
 		log.Info("run", "container", containerId)
 
 		// 1. configure exec
-		child := exec.Command("/proc/self/exe", "child", runtimePath)
-		// TODO: use a PTY
+		var childArgs []string
+		cmd.Root().PersistentFlags().VisitAll(func(f *pflag.Flag) {
+			// pass down root flags
+			childArgs = append(childArgs, fmt.Sprintf("--%s=%s", f.Name, f.Value))
+		})
+		childArgs = append(childArgs, "child")
+		childArgs = append(childArgs, runtimePath)
+
+		child := exec.Command("/proc/self/exe", childArgs...)
+		// TODO: use a PTY?
 		child.Stdin = os.Stdin
 		child.Stdout = os.Stdout
 		child.Stderr = os.Stderr
