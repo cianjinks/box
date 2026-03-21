@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -184,7 +185,7 @@ func ParseCapabilities(capabilities []string) ([]cap.Value, error) {
 const ipForwardFile = "/proc/sys/net/ipv4/ip_forward"
 
 // SetupNAT enables IP forwarding and creates an iptables rule to masquerade the container IP as coming from the host
-func SetupNAT(ip string) (int, error) {
+func SetupNAT(ip string, portMapping string) (int, error) {
 	// Try enable IP forwarding if it's not already
 	data, err := os.ReadFile(ipForwardFile)
 	if err != nil {
@@ -200,20 +201,62 @@ func SetupNAT(ip string) (int, error) {
 		}
 	}
 
-	// TODO: if we ever wanted container to container networking we should do full subnet and disable internal NAT
-	cmd := exec.Command("iptables", "-t", "nat", "-A", "POSTROUTING", "-s", fmt.Sprintf("%s/32", ip), "-j", "MASQUERADE")
-	if err := cmd.Run(); err != nil {
-		return ipForwardEnabled, fmt.Errorf("failed to create iptables entry for container: %w", err)
+	// outbound
+	if err := outboundNATRule(ip, false); err != nil {
+		return ipForwardEnabled, err
 	}
+
+	// inbound
+	if err := inboundNATRule(ip, portMapping, false); err != nil {
+		return ipForwardEnabled, err
+	}
+
 	return ipForwardEnabled, nil
 }
 
 // CleanupNAT cleans up the ip forwading setting and iptables rule added by SetupNAT
-func CleanupNAT(ip string, ipForwardEnabled int) {
+func CleanupNAT(ip string, portMapping string, ipForwardEnabled int) {
 	os.WriteFile(ipForwardFile, []byte(strconv.Itoa(ipForwardEnabled)), 0644)
-	cmd := exec.Command("iptables", "-t", "nat", "-D", "POSTROUTING", "-s", fmt.Sprintf("%s/32", ip), "-j", "MASQUERADE")
-	// we don't handle the errror since if the rule was never written it will fail
-	cmd.Run()
+	// we don't handle the error since if the rule was never written it will fail
+	outboundNATRule(ip, true)
+	inboundNATRule(ip, portMapping, true)
+}
+
+func outboundNATRule(ip string, del bool) error {
+	mode := "-A"
+	if del {
+		mode = "-D"
+	}
+	// TODO: if we ever wanted container to container networking we should do full subnet and disable internal NAT
+	cmd := exec.Command("iptables", "-t", "nat", mode, "POSTROUTING", "-s", fmt.Sprintf("%s/32", ip), "-j", "MASQUERADE")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to %s iptables entry for container outbound: %w", mode, err)
+	}
+	return nil
+}
+
+func inboundNATRule(ip string, portMapping string, del bool) error {
+	mode := "-A"
+	if del {
+		mode = "-D"
+	}
+
+	if portMapping != "" {
+		ports := strings.Split(portMapping, ":")
+		if len(ports) != 3 {
+			return errors.New("invalid port mapping provided")
+		}
+		hostPort := ports[0]
+		containerPort := ports[1]
+		protocol := ports[2]
+		destination := fmt.Sprintf("%s:%s", ip, containerPort)
+		cmd := exec.Command("iptables", "-t", "nat", mode, "PREROUTING", "-p", protocol, "--dport", hostPort, "-j", "DNAT", "--to-destination", destination)
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("failed to %s iptables entry for container inbound: %w", mode, err)
+		}
+	}
+
+	return nil
 }
 
 // FindExecutable takes an executable name and a PATH environment variable and tries

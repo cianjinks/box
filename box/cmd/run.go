@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"runtime"
 	"syscall"
 
@@ -26,10 +27,12 @@ const (
 
 var cpuCount int
 var memoryMiB int
+var portMapping string
 
 func init() {
 	runCmd.Flags().IntVar(&cpuCount, "cpus", -1, "Limit the number of CPUs available to the container")
 	runCmd.Flags().IntVar(&memoryMiB, "mem", -1, "Limit the amount of memory available to the container (in MiB)")
+	runCmd.Flags().StringVarP(&portMapping, "port", "p", "", "Expose a port within the container on the host as <host-port>:<container-port>:<protocol>")
 }
 
 var runCmd = &cobra.Command{
@@ -47,6 +50,11 @@ var runCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+
+		// signal trapping to ensure graceful shutdown
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, os.Interrupt)
+		defer signal.Stop(sigChan)
 
 		log.Info("run", "container", containerId)
 
@@ -117,11 +125,11 @@ var runCmd = &cobra.Command{
 			return fmt.Errorf("failed to set host veth UP: %w", err)
 		}
 		// setup NAT
-		ipForwardEnabled, err := SetupNAT(ContainerIP)
+		ipForwardEnabled, err := SetupNAT(ContainerIP, portMapping)
+		defer CleanupNAT(ContainerIP, portMapping, ipForwardEnabled)
 		if err != nil {
 			return fmt.Errorf("failed to setup container NAT: %w", err)
 		}
-		defer CleanupNAT(ContainerIP, ipForwardEnabled)
 
 		// 3. place child in cgroup using systemd
 		conn, err := systemd.NewWithContext(ctx)
