@@ -107,6 +107,8 @@ root@box:/# dig docker.com +short
 
 ### nginx
 
+https://hub.docker.com/_/nginx
+
 Exposing a web server on the host's port 8080.
 
 ```
